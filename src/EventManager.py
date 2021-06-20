@@ -2,6 +2,8 @@ import datetime
 import time
 from typing import Tuple, Optional, Callable, List, Iterable
 
+import json
+
 from web3 import Web3
 from web3.contract import Contract
 from web3.datastructures import AttributeDict
@@ -13,7 +15,7 @@ from eth_abi.codec import ABICodec
 from web3._utils.filters import construct_event_filter_params
 from web3._utils.events import get_event_data
 import logging
-
+from web3.providers.rpc import HTTPProvider
 from StateManager import EventScannerState
 
 class EventManager:
@@ -27,8 +29,7 @@ class EventManager:
     because it cannot correctly throttle and decrease the `eth_getLogs` block number range.
     """
 
-    def __init__(self, web3: Web3, contract: Contract, state: EventScannerState, events: List, filters: {},
-                 max_chunk_scan_size: int = 10000, max_request_retries: int = 10, request_retry_seconds: float = 3.0):
+    def __init__(self, api_url: str, ABI: str, state: EventScannerState, addr: str, max_chunk_scan_size: int = 10000, max_request_retries: int = 10, request_retry_seconds: float = 3.0):
         """
         :param contract: Contract
         :param events: List of web3 Event we scan
@@ -37,12 +38,22 @@ class EventManager:
         :param max_request_retries: How many times we try to reattempt a failed JSON-RPC call
         :param request_retry_seconds: Delay between failed requests to let JSON-RPC server to recover
         """
+        provider = HTTPProvider(api_url)
 
-        self.contract = contract
-        self.web3 = web3
+        # Remove the default JSON-RPC retry middleware
+        # as it correctly cannot handle eth_getLogs block range
+        # throttle down.
+        provider.middlewares.clear()
+
+        self.web3 = Web3(provider)
+
+        # Prepare stub ERC-20 contract object
+        abi = json.loads(ABI)
+        self.contract = self.web3.eth.contract(abi=abi)
+
         self.state = state
-        self.events = events
-        self.filters = filters
+        self.events = [self.contract.events.Transfer]
+        self.filters = {"address": addr}
 
         # Our JSON-RPC throttling parameters
         self.min_scan_chunk_size = 10  # 12 s/block = 120 seconds period
@@ -56,6 +67,9 @@ class EventManager:
 
         # Factor how was we increase chunk size if no results found
         self.chunk_size_increase = 2.0
+        self.NUM_BLOCKS_RESCAN_FOR_FORKS = 12
+        # last scan block num, served as cache
+        self.last_scanned_block = -1
 
     @property
     def address(self):
@@ -95,7 +109,10 @@ class EventManager:
         return self.web3.eth.blockNumber - 1
 
     def get_last_scanned_block(self) -> int:
-        return self.state.get_last_scanned_block()
+        if self.last_scanned_block != -1:
+            self.last_scanned_block = self.state.get_last_scanned_block()
+
+        return self.last_scanned_block
 
     def delete_potentially_forked_block_data(self, after_block: int):
         """Purge old data in the case of blockchain reorganisation."""
@@ -238,8 +255,8 @@ class EventManager:
             all_processed += new_entries
 
             # Print progress bar
-            if progress_callback:
-                progress_callback(start_block, end_block, current_block, end_block_timestamp, chunk_size, len(new_entries))
+            #if progress_callback:
+            #    progress_callback(start_block, end_block, current_block, end_block_timestamp, chunk_size, len(new_entries))
 
             # Try to guess how many blocks to fetch over `eth_getLogs` API next time
             chunk_size = self.estimate_next_chunk_size(chunk_size, len(new_entries))
@@ -250,6 +267,13 @@ class EventManager:
             self.state.end_chunk(current_end)
 
         return all_processed, total_chunks_scanned
+
+
+    def run(self):
+        while True:
+            start_block = self.get_suggested_scan_start_block()
+            self.scan(start_block, self.get_suggested_scan_end_block())
+            time.sleep(self.request_retry_seconds)
 
 def _retry_web3_call(func, start_block, end_block, retries, delay) -> Tuple[int, list]:
     """A custom retry loop to throttle down block range.

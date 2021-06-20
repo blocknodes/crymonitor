@@ -25,3 +25,8 @@ class Event(Base):
     to = sa.Column(sa.String(256), nullable=True)
     value = sa.Column(sa.Numeric(36,18))
     timestamp = sa.Column(sa.TIMESTAMP, nullable=True)
+
+class Sequence(Base):
+    __tablename__ = 'sequence'
+    curblock = sa.Column(sa.BigInteger, nullable=True, primary_key=True)
+

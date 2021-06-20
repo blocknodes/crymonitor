@@ -3,6 +3,9 @@ import time
 import logging
 from web3.datastructures import AttributeDict
 from abc import ABC, abstractmethod
+
+from models import get_db_session
+
 class EventScannerState(ABC):
     """Application state that remembers what blocks we have scanned in the case of crash.
     """
@@ -48,6 +51,53 @@ class EventScannerState(ABC):
 
         Purges any potential minor reorg data.
         """
+
+class DBScannerState(EventScannerState):
+    def __init__(self, db_url='root:1@192.168.0.100/crypto'):
+        self.engine, self.DBSESS = get_db_session()
+        self.sess = self.DBSESS()
+
+    def get_last_scanned_block(self) -> int:
+        """Number of the last block we have scanned on the previous cycle.
+
+        :return: 0 if no blocks scanned yet
+        """
+        pass
+
+    def start_chunk(self, block_number: int, chunk_size: int):
+        """Scanner is about to ask data of multiple blocks over JSON-RPC.
+
+        Start a database session if needed.
+        """
+        pass
+
+    def end_chunk(self, block_number: int):
+        """Scanner finished a number of blocks.
+
+        Persistent any data in your state now.
+        """
+        pass
+
+    def process_event(self, block_when: datetime.datetime, event: AttributeDict) -> object:
+        """Process incoming events.
+
+        This function takes raw events from Web3, transforms them to your application internal
+        format, then saves them in a database or some other state.
+
+        :param block_when: When this block was mined
+
+        :param event: Symbolic dictionary of the event data
+
+        :return: Internal state structure that is the result of event tranformation.
+        """
+        pass
+
+    def delete_data(self, since_block: int) -> int:
+        """Delete any data since this block was scanned.
+
+        Purges any potential minor reorg data.
+        """
+        pass
 
 class JSONifiedState(EventScannerState):
     """Store the state of scanned blocks and all events.
