@@ -57,6 +57,9 @@ class DBScannerState(EventScannerState):
         self.engine, self.DBSESS = get_db_session()
         self.sess = self.DBSESS()
 
+    def get_last_block(self):
+        return [], 0
+
     def get_last_scanned_block(self) -> int:
         """Number of the last block we have scanned on the previous cycle.
 

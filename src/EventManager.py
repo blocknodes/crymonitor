@@ -67,9 +67,8 @@ class EventManager:
 
         # Factor how was we increase chunk size if no results found
         self.chunk_size_increase = 2.0
-        self.NUM_BLOCKS_RESCAN_FOR_FORKS = 12
-        # last scan block num, served as cache
-        self.last_scanned_block = -1
+        self.NUM_BLOCKS_RESCAN_FOR_FORKS = 1
+
 
     @property
     def address(self):
@@ -86,20 +85,20 @@ class EventManager:
         last_time = block_info["timestamp"]
         return datetime.datetime.utcfromtimestamp(last_time)
 
-    def get_suggested_scan_start_block(self):
-        """Get where we should start to scan for new token events.
-
-        If there are no prior scans, start from block 1.
-        Otherwise, start from the last end block minus ten blocks.
-        We rescan the last ten scanned blocks in the case there were forks to avoid
-        misaccounting due to minor single block works (happens once in a hour in Ethereum).
-        These heurestics could be made more robust, but this is for the sake of simple reference implementation.
-        """
-
-        end_block = self.get_last_scanned_block()
-        if end_block:
-            return max(1, end_block - self.NUM_BLOCKS_RESCAN_FOR_FORKS)
-        return 1
+#    def get_suggested_scan_start_block(self):
+#        """Get where we should start to scan for new token events
+#
+#        If there are no prior scans, start from block 1.
+#        Otherwise, start from the last end block minus ten blocks.
+#        We rescan the last ten scanned blocks in the case there were forks to avoid
+#        misaccounting due to minor single block works (happens once in a hour in Ethereum).
+#        These heurestics could be made more robust, but this is for the sake of simple reference implementation.
+#        """
+#
+#        end_block = self.get_last_scanned_block()
+#        if end_block:
+#            return max(1, end_block - self.NUM_BLOCKS_RESCAN_FOR_FORKS)
+#        return 1
 
     def get_suggested_scan_end_block(self):
         """Get the last mined block on Ethereum chain we are following."""
@@ -109,14 +108,18 @@ class EventManager:
         return self.web3.eth.blockNumber - 1
 
     def get_last_scanned_block(self) -> int:
-        if self.last_scanned_block != -1:
-            self.last_scanned_block = self.state.get_last_scanned_block()
-
-        return self.last_scanned_block
+        """Get last scanned block"""
+        return self.state.get_last_scanned_block()
 
     def delete_potentially_forked_block_data(self, after_block: int):
         """Purge old data in the case of blockchain reorganisation."""
         self.state.delete_data(after_block)
+
+    def compare_block(self, block, events):
+        return False
+
+    def rollback(self, block):
+        return
 
     def scan_chunk(self, start_block, end_block) -> Tuple[int, datetime.datetime, list]:
         """Read and process events between to block numbers.
@@ -157,6 +160,30 @@ class EventManager:
                 retries=self.max_request_retries,
                 delay=self.request_retry_seconds)
 
+            # Do sanity check in case of minor reorg
+            reorg  = False
+            last_block_num = 0
+            while True:
+                last_block, last_block_num  = self.state.get_last_block()
+
+                _, last_events = _retry_web3_call(
+                    _fetch_events,
+                    start_block=start_block,
+                    end_block=end_block,
+                    retries=self.max_request_retries,
+                    delay=self.request_retry_seconds)
+
+                if self.compare_block(last_block, last_events) != True:
+                    reorg = True
+                    self.rollback(last_block)
+                else:
+                    break
+
+            # if reorg, discard all new events
+            if reorg:
+                end_block = last_block_num
+                break
+
             for evt in events:
                 idx = evt["logIndex"]  # Integer of the log index position in the block, null when its pending
 
@@ -172,6 +199,10 @@ class EventManager:
 
                 logging.debug("Processing event %s, block:%d count:%d", evt["event"], evt["blockNumber"])
                 processed = self.state.process_event(block_when, evt)
+                if processed == 'conflict':
+                    end_block = self.rollback(block_number)
+                    break;
+
                 all_processed.append(processed)
 
         end_block_timestamp = get_block_when(end_block)
@@ -271,7 +302,7 @@ class EventManager:
 
     def run(self):
         while True:
-            start_block = self.get_suggested_scan_start_block()
+            start_block = self.get_last_scanned_block()
             self.scan(start_block, self.get_suggested_scan_end_block())
             time.sleep(self.request_retry_seconds)
 
