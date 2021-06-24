@@ -17,6 +17,7 @@ from web3._utils.events import get_event_data
 import logging
 from web3.providers.rpc import HTTPProvider
 from StateManager import EventScannerState
+from Notifier import EmailNotifier
 
 class EventManager:
     """Scan blockchain for events and try not to abuse JSON-RPC API too much.
@@ -29,7 +30,7 @@ class EventManager:
     because it cannot correctly throttle and decrease the `eth_getLogs` block number range.
     """
 
-    def __init__(self, api_url: str, ABI: str, state: EventScannerState, addr: str, max_chunk_scan_size: int = 10000, max_request_retries: int = 10, request_retry_seconds: float = 3.0):
+    def __init__(self, api_url: str, ABI: str, state: EventScannerState,notifier: EmailNotifier, addr: str, max_chunk_scan_size: int = 10000, max_request_retries: int = 10, request_retry_seconds: float = 3.0):
         """
         :param contract: Contract
         :param events: List of web3 Event we scan
@@ -68,6 +69,8 @@ class EventManager:
         # Factor how was we increase chunk size if no results found
         self.chunk_size_increase = 2.0
         self.NUM_BLOCKS_RESCAN_FOR_FORKS = 1
+
+        self.notifier = notifier
 
 
     @property
@@ -143,7 +146,7 @@ class EventManager:
             return block_timestamps[block_num]
 
         all_processed = []
-
+        top_holders = self.state.get_top_holders(50)
         for event_type in self.events:
 
             # Callable that takes care of the underlying web3 call
@@ -201,10 +204,14 @@ class EventManager:
                 block_when = get_block_when(block_number)
 
                 logging.debug("Processing event %s, block:%d", evt["event"], evt["blockNumber"])
+
+                # Send notification mail
+                if evt['args']['from'] in top_holders or evt['args']['to'] in top_holders:
+                    content = {}
+                    content['args'] = evt['args'].__dict__
+                    self.notifier.send("shiba", json.dumps(content))
+                    logging.error(json.dumps(content))
                 processed = self.state.process_event(block_when, evt)
-                if processed == 'conflict':
-                    end_block = self.rollback(block_number)
-                    break;
 
                 all_processed.append(processed)
 

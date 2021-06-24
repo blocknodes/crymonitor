@@ -5,7 +5,7 @@ from web3.datastructures import AttributeDict
 from abc import ABC, abstractmethod
 
 from models import get_db_session
-from sqlalchemy import and_, or_, not_, func
+from sqlalchemy import and_, or_, not_, func, desc
 from models import Base
 from models import delete_all_table
 from models import get_db_session
@@ -86,6 +86,13 @@ class DBScannerState(EventScannerState):
                 curblock = seq.curblock
         return curblock
 
+    def get_top_holders(self, rank):
+        top_holders = set()
+        with self.sess.begin():
+            holders = self.sess.query(Holder).order_by(desc(Holder.balance)).limit(rank).all()
+            for holder in holders:
+                top_holders.add(holder.addr)
+        return top_holders
 
     def start_chunk(self, block_number: int, chunk_size: int):
         """Scanner is about to ask data of multiple blocks over JSON-RPC.
@@ -147,7 +154,6 @@ class DBScannerState(EventScannerState):
                 self.update_holder(self.sess, old_event)            
             events.delete()
             seq.curblock = self.sess.query(func.max(Event.blocknum)).scalar()
-            pass
 
 
     def process_event(self, block_when: datetime.datetime, event: AttributeDict) -> object:
