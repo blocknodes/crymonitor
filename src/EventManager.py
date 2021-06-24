@@ -116,7 +116,10 @@ class EventManager:
         self.state.delete_data(after_block)
 
     def compare_block(self, block, events):
-        return False
+        event_txhas_set = set()
+        for event in events:
+            event_txhas_set.add(event['transactionHash'].hex())
+        return block == event_txhas_set
 
     def rollback(self, block):
         return
@@ -168,14 +171,14 @@ class EventManager:
 
                 _, last_events = _retry_web3_call(
                     _fetch_events,
-                    start_block=start_block,
-                    end_block=end_block,
+                    start_block=last_block_num,
+                    end_block=last_block_num,
                     retries=self.max_request_retries,
                     delay=self.request_retry_seconds)
 
                 if self.compare_block(last_block, last_events) != True:
                     reorg = True
-                    self.rollback(last_block)
+                    self.state.rollback_last()
                 else:
                     break
 
@@ -197,7 +200,7 @@ class EventManager:
                 # from our in-memory cache
                 block_when = get_block_when(block_number)
 
-                logging.debug("Processing event %s, block:%d count:%d", evt["event"], evt["blockNumber"])
+                logging.debug("Processing event %s, block:%d", evt["event"], evt["blockNumber"])
                 processed = self.state.process_event(block_when, evt)
                 if processed == 'conflict':
                     end_block = self.rollback(block_number)
@@ -216,6 +219,7 @@ class EventManager:
         * We want to minimize API calls over empty blocks
 
         * We want to make sure that one scan chunk does not try to process too many entries once, as we try to control commit buffer size and potentially asynchronous busy loop
+
 
         * Do not overload node serving JSON-RPC API by asking data for too many events at a time
 
@@ -302,7 +306,7 @@ class EventManager:
 
     def run(self):
         while True:
-            start_block = self.get_last_scanned_block()
+            start_block = self.get_last_scanned_block() + 1
             self.scan(start_block, self.get_suggested_scan_end_block())
             time.sleep(self.request_retry_seconds)
 

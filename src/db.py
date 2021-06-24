@@ -7,7 +7,7 @@ from models import Holder
 import decimal
 import json
 import tqdm
-engine, DBSession = get_db_session('root:1@172.16.0.112/crypto')
+engine, DBSession = get_db_session('root:1@172.16.0.112/shibacrypto')
 sess = DBSession()
 Base.metadata.create_all(engine)
 from sqlalchemy import and_, or_, not_
@@ -64,9 +64,6 @@ if __name__ == '__main__':
     first_time = True
     for key in tqdm.tqdm(events.keys()):
         blocknum = int(key)
-        if blocknum > 12662830:
-            print('we stop')
-            break
         txs = events[key]
         for txhash in txs.keys():
             logs = txs[txhash]

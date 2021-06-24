@@ -5,6 +5,14 @@ from web3.datastructures import AttributeDict
 from abc import ABC, abstractmethod
 
 from models import get_db_session
+from sqlalchemy import and_, or_, not_, func
+from models import Base
+from models import delete_all_table
+from models import get_db_session
+from models import Event
+from models import Sequence
+from models import Holder
+import decimal
 
 class EventScannerState(ABC):
     """Application state that remembers what blocks we have scanned in the case of crash.
@@ -33,16 +41,9 @@ class EventScannerState(ABC):
 
     @abstractmethod
     def process_event(self, block_when: datetime.datetime, event: AttributeDict) -> object:
-        """Process incoming events.
+        """Scanner finished a number of blocks.
 
-        This function takes raw events from Web3, transforms them to your application internal
-        format, then saves them in a database or some other state.
-
-        :param block_when: When this block was mined
-
-        :param event: Symbolic dictionary of the event data
-
-        :return: Internal state structure that is the result of event tranformation.
+        Persistent any data in your state now.
         """
 
     @abstractmethod
@@ -53,19 +54,38 @@ class EventScannerState(ABC):
         """
 
 class DBScannerState(EventScannerState):
-    def __init__(self, db_url='root:1@192.168.0.100/crypto'):
-        self.engine, self.DBSESS = get_db_session()
+    def __init__(self, db_url):
+        self.engine, self.DBSESS = get_db_session(db_url)
         self.sess = self.DBSESS()
+        self.event_cache=[]
 
     def get_last_block(self):
-        return [], 0
+        """
+        just return txhash set in a block to detect minor reorg
+        """
+        curblock = self.get_last_scanned_block()
+        txhash_set = set()
+        with self.sess.begin():
+            block = self.sess.query(Event).filter(Event.blocknum == curblock)
+            for event in block:
+                txhash_set.add(event.__dict__['txhash'])
+        return txhash_set, curblock
 
     def get_last_scanned_block(self) -> int:
         """Number of the last block we have scanned on the previous cycle.
 
-        :return: 0 if no blocks scanned yet
+        :return: 0 if no blocks scanned delete_potentially_forked_block_data
         """
-        pass
+        curblock = 0
+        with self.sess.begin():
+            seq = self.sess.query(Sequence).first()
+            if seq == None:
+                seq = Sequence(curblock=curblock)
+                self.sess.add(seq)
+            else:
+                curblock = seq.curblock
+        return curblock
+
 
     def start_chunk(self, block_number: int, chunk_size: int):
         """Scanner is about to ask data of multiple blocks over JSON-RPC.
@@ -74,12 +94,61 @@ class DBScannerState(EventScannerState):
         """
         pass
 
+    def update_holder(self, sess, event):
+        if event.value == decimal.Decimal(0):
+            return
+        holder_src = sess.query(Holder).filter(Holder.addr==event.src).first()
+        if holder_src is None:
+            holder_src = Holder(addr=event.src, balance=0)
+            sess.add(holder_src)
+    
+        holder_dst = sess.query(Holder).filter(Holder.addr==event.dst).first()
+        if holder_dst is None:
+            holder_dst = Holder(addr=event.dst, balance=0)
+            sess.add(holder_dst)
+    
+        holder_src.balance = holder_src.balance - decimal.Decimal(event.value)
+        holder_dst.balance = holder_dst.balance + decimal.Decimal(event.value)
+    
+        if holder_src.balance == decimal.Decimal(0):
+            sess.delete(holder_src)
+       
+        if holder_dst.balance == decimal.Decimal(0):
+            sess.delete(holder_dst)
+
     def end_chunk(self, block_number: int):
         """Scanner finished a number of blocks.
 
         Persistent any data in your state now.
         """
-        pass
+        with self.sess.begin():
+            seq = self.sess.query(Sequence).first()
+            if seq == None:
+                new_seq = Sequence(curblock=block_num)
+                self.sess.add(new_seq)
+            else:
+                seq.curblock=block_number
+            for event in self.event_cache:
+                self.sess.add(event)
+                self.update_holder(self.sess, event)
+        self.event_cache=[]
+                
+    def rollback_last(self):
+        with self.sess.begin():
+            seq = self.sess.query(Sequence).first()
+            if seq == None:
+                return
+            last_block_num = seq.curblock
+            events = self.sess.query(Event).filter(Event.blocknum == last_block_num)
+            for old_event in events:
+                tmp = old_event.src
+                old_event.src = old_event.dst
+                old_event.dst = tmp
+                self.update_holder(self.sess, old_event)            
+            events.delete()
+            seq.curblock = self.sess.query(func.max(Event.blocknum)).scalar()
+            pass
+
 
     def process_event(self, block_when: datetime.datetime, event: AttributeDict) -> object:
         """Process incoming events.
@@ -93,8 +162,30 @@ class DBScannerState(EventScannerState):
 
         :return: Internal state structure that is the result of event tranformation.
         """
-        pass
+        """Record a ERC-20 transfer in our database."""
+        # Events are keyed by their transaction hash and log index
+        # One transaction may contain multiple events
+        # and each one of those gets their own log index
 
+        # event_name = event.event # "Transfer"
+        log_index = event.logIndex  # Log index within the block
+        # transaction_index = event.transactionIndex  # Transaction index within the block
+        txhash = event.transactionHash.hex()  # Transaction hash
+        block_number = event.blockNumber
+
+        # Convert ERC-20 Transfer event to our internal format
+        args = event["args"]
+        transfer = {
+            "blocknum": block_number,
+            "logindex": log_index,
+            "txhash": txhash,
+            "src": args["from"],
+            "dst": args.to,
+            "value": args.value,
+            "timestamp": block_when.isoformat(),
+        }
+        event = Event(**transfer)
+        self.event_cache.append(event)
     def delete_data(self, since_block: int) -> int:
         """Delete any data since this block was scanned.
 

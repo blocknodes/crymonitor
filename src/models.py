@@ -18,7 +18,7 @@ def delete_all_table():
         #    con.execute(table.delete())
         trans.commit()
 
-def get_db_session(url='root:1@192.168.0.106/crypto'):
+def get_db_session(url):
     engine = create_engine('mysql+mysqldb://' + url)
     DBSession = sessionmaker(bind=engine)
     return engine, DBSession
