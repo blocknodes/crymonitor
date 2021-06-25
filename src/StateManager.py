@@ -14,6 +14,8 @@ from models import Sequence
 from models import Holder
 import decimal
 
+decimal.getcontext().prec=36
+
 class EventScannerState(ABC):
     """Application state that remembers what blocks we have scanned in the case of crash.
     """
@@ -63,13 +65,13 @@ class DBScannerState(EventScannerState):
         """
         just return txhash set in a block to detect minor reorg
         """
-        curblock = self.get_last_scanned_block()
         txhash_set = set()
         with self.sess.begin():
-            block = self.sess.query(Event).filter(Event.blocknum == curblock)
+            last_block_num =self.sess.query(func.max(Event.blocknum)).scalar() 
+            block = self.sess.query(Event).filter(Event.blocknum == last_block_num)
             for event in block:
                 txhash_set.add(event.__dict__['txhash'])
-        return txhash_set, curblock
+        return txhash_set, last_block_num
 
     def get_last_scanned_block(self) -> int:
         """Number of the last block we have scanned on the previous cycle.
@@ -104,6 +106,7 @@ class DBScannerState(EventScannerState):
     def update_holder(self, sess, event):
         if event.value == decimal.Decimal(0):
             return
+        logging.error(f'update holder event: {event.__dict__}')
         holder_src = sess.query(Holder).filter(Holder.addr==event.src).first()
         if holder_src is None:
             holder_src = Holder(addr=event.src, balance=0)
@@ -117,6 +120,9 @@ class DBScannerState(EventScannerState):
         holder_src.balance = holder_src.balance - decimal.Decimal(event.value)
         holder_dst.balance = holder_dst.balance + decimal.Decimal(event.value)
     
+        
+        if holder_src.balance < decimal.Decimal(0):
+           raise 
         if holder_src.balance == decimal.Decimal(0):
             sess.delete(holder_src)
        
@@ -145,15 +151,17 @@ class DBScannerState(EventScannerState):
             seq = self.sess.query(Sequence).first()
             if seq == None:
                 return
-            last_block_num = seq.curblock
+            last_block_num =self.sess.query(func.max(Event.blocknum)).scalar() 
             events = self.sess.query(Event).filter(Event.blocknum == last_block_num)
             for old_event in events:
+                logging.war(f"roll back event: {old_event.__dict__}")
                 tmp = old_event.src
                 old_event.src = old_event.dst
                 old_event.dst = tmp
                 self.update_holder(self.sess, old_event)            
             events.delete()
             seq.curblock = self.sess.query(func.max(Event.blocknum)).scalar()
+            pass
 
 
     def process_event(self, block_when: datetime.datetime, event: AttributeDict) -> object:

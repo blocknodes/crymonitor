@@ -124,9 +124,6 @@ class EventManager:
             event_txhas_set.add(event['transactionHash'].hex())
         return block == event_txhas_set
 
-    def rollback(self, block):
-        return
-
     def scan_chunk(self, start_block, end_block) -> Tuple[int, datetime.datetime, list]:
         """Read and process events between to block numbers.
 
@@ -146,7 +143,7 @@ class EventManager:
             return block_timestamps[block_num]
 
         all_processed = []
-        top_holders = self.state.get_top_holders(50)
+        top_holders = self.state.get_top_holders(5000)
         for event_type in self.events:
 
             # Callable that takes care of the underlying web3 call
@@ -265,7 +262,8 @@ class EventManager:
         :return: [All processed events, number of chunks used]
         """
 
-        assert start_block <= end_block
+        if start_block > end_block:
+            return [], 0
 
         current_block = start_block
 

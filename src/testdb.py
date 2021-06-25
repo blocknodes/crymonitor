@@ -62,9 +62,16 @@ if __name__ == '__main__':
             sess.add(seq)
 
     first_time = True
+    first_time = False
+    start_block=int(sys.argv[2])
+    print(f"start block is {start_block}")
+    end_block=int(sys.argv[3])
+    print(f"end block is {end_block}")
     for key in tqdm.tqdm(events.keys()):
         blocknum = int(key)
-        if blocknum > 12662830:
+        if blocknum < start_block:
+            continue
+        if blocknum > end_block:
             print('we stop')
             break
         txs = events[key]

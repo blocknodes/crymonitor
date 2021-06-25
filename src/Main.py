@@ -7,13 +7,13 @@ from Notifier import EmailNotifier
 
 if __name__ == "__main__":
     config = configparser.ConfigParser()
-    logging.basicConfig(level=logging.DEBUG)
+    config.read('../config.ini')
+    logging.basicConfig(level=logging.DEBUG, filename=config['DEFAULT']['log_file'])
     logging.debug('what the fuck!')
     # Enable logs to the stdout.
     # DEBUG is very verbose level
-    logging.basicConfig(level=logging.INFO)
+    #logging.basicConfig(level=logging.INFO, filename="mylog.log")
     
-    config.read('../config.ini')
     api_url = config['DEFAULT']['api_url']
     ABI = config['DEFAULT']['abi']
     addr =config['DEFAULT']['contract_addr']
