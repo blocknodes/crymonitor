@@ -262,6 +262,7 @@ class EventManager:
         :return: [All processed events, number of chunks used]
         """
 
+        logging.debug(f"start block :{start_block} end_block:{end_block}")
         if start_block > end_block:
             return [], 0
 
@@ -281,6 +282,8 @@ class EventManager:
 
             # Print some diagnostics to logs to try to fiddle with real world JSON-RPC API performance
             estimated_end_block = current_block + chunk_size
+            if estimated_end_block > end_block:
+                estimated_end_block = end_block
             logging.debug(
                 "Scanning token transfers for blocks: %d - %d, chunk size %d, last chunk scan took %f, last logs found %d",
                 current_block, estimated_end_block, chunk_size, last_scan_duration, last_logs_found)
