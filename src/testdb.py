@@ -7,7 +7,7 @@ from models import Holder
 import decimal
 import json
 import tqdm
-engine, DBSession = get_db_session('root:1@172.16.0.112/crypto')
+engine, DBSession = get_db_session('root:1@172.16.0.112/shibacrypto')
 sess = DBSession()
 Base.metadata.create_all(engine)
 from sqlalchemy import and_, or_, not_

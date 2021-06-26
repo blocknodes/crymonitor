@@ -68,7 +68,7 @@ class EventManager:
 
         # Factor how was we increase chunk size if no results found
         self.chunk_size_increase = 2.0
-        self.NUM_BLOCKS_RESCAN_FOR_FORKS = 1
+        self.conservative_threshold = 12
 
         self.notifier = notifier
 
@@ -166,6 +166,7 @@ class EventManager:
             # Do sanity check in case of minor reorg
             reorg  = False
             last_block_num = 0
+            # check reorg
             while True:
                 last_block, last_block_num  = self.state.get_last_block()
 
@@ -187,6 +188,33 @@ class EventManager:
                 end_block = last_block_num
                 break
 
+            # check evt idx and block timestamp
+            evt_valid = True
+            for evt in events:
+                idx = evt["logIndex"]  # Integer of the log index position in the block, null when its pending
+
+                # We cannot avoid minor chain reorganisations, but
+                # at least we must avoid blocks that are not mined yet
+                if idx is None:
+                    logging.warn(f"idx of event: {evt}  is None")
+                    evt_valid = False
+                    break
+
+                block_number = evt["blockNumber"]
+
+                # Get UTC time when this event happened (block mined timestamp)
+                # from our in-memory cache
+                block_when = get_block_when(block_number)
+
+                if block_number == None:
+                    logging.warn(f"timestamp of event: {evt}  is None")
+                    evt_valid = False
+                    break
+
+            if not evt_valid:
+                end_block = start_block - 1
+                break
+
             for evt in events:
                 idx = evt["logIndex"]  # Integer of the log index position in the block, null when its pending
 
@@ -200,7 +228,7 @@ class EventManager:
                 # from our in-memory cache
                 block_when = get_block_when(block_number)
 
-                logging.debug("Processing event %s, block:%d", evt["event"], evt["blockNumber"])
+                logging.debug(f"Processing event {evt}")
 
                 # Send notification mail
                 if evt['args']['from'] in top_holders or evt['args']['to'] in top_holders:
@@ -291,23 +319,15 @@ class EventManager:
             start = time.time()
             actual_end_block, end_block_timestamp, new_entries = self.scan_chunk(current_block, estimated_end_block)
 
-            # Where does our current chunk scan ends - are we out of chain yet?
-            current_end = actual_end_block
-
             last_scan_duration = time.time() - start
-            all_processed += new_entries
-
-            # Print progress bar
-            #if progress_callback:
-            #    progress_callback(start_block, end_block, current_block, end_block_timestamp, chunk_size, len(new_entries))
 
             # Try to guess how many blocks to fetch over `eth_getLogs` API next time
             chunk_size = self.estimate_next_chunk_size(chunk_size, len(new_entries))
 
             # Set where the next chunk starts
-            current_block = current_end + 1
+            current_block = actual_end_block + 1
             total_chunks_scanned += 1
-            self.state.end_chunk(current_end)
+            self.state.end_chunk(actual_end_block)
 
         return all_processed, total_chunks_scanned
 
@@ -315,7 +335,12 @@ class EventManager:
     def run(self):
         while True:
             start_block = self.get_last_scanned_block() + 1
-            self.scan(start_block, self.get_suggested_scan_end_block())
+            end_block = self.get_suggested_scan_end_block()
+            if (end_block - start_block) < self.conservative_threshold:
+                logging.debug(f"switch to conservative mode")
+                _, start_block = self.state.get_last_block()
+                start_block = start_block + 1
+            self.scan(start_block, end_block)
             time.sleep(self.request_retry_seconds)
 
 def _retry_web3_call(func, start_block, end_block, retries, delay) -> Tuple[int, list]:

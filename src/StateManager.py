@@ -153,11 +153,15 @@ class DBScannerState(EventScannerState):
                 return
             last_block_num =self.sess.query(func.max(Event.blocknum)).scalar() 
             events = self.sess.query(Event).filter(Event.blocknum == last_block_num)
+            event_stack = []
             for old_event in events:
-                logging.war(f"roll back event: {old_event.__dict__}")
+                logging.warn(f"roll back event: {old_event.__dict__}")
                 tmp = old_event.src
                 old_event.src = old_event.dst
                 old_event.dst = tmp
+                event_stack.append(old_event)
+            for i in range(len(event_stack)):
+                old_event = event_stack.pop()
                 self.update_holder(self.sess, old_event)            
             events.delete()
             seq.curblock = self.sess.query(func.max(Event.blocknum)).scalar()
