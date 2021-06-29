@@ -334,14 +334,18 @@ class EventManager:
 
     def run(self):
         while True:
-            start_block = self.get_last_scanned_block() + 1
-            end_block = self.get_suggested_scan_end_block()
-            if (end_block - start_block) < self.conservative_threshold:
-                logging.debug(f"switch to conservative mode")
-                _, start_block = self.state.get_last_block()
-                start_block = start_block + 1
-            self.scan(start_block, end_block)
-            time.sleep(self.request_retry_seconds)
+            try:
+                start_block = self.get_last_scanned_block() + 1
+                end_block = self.get_suggested_scan_end_block()
+                if (end_block - start_block) < self.conservative_threshold:
+                    logging.debug(f"switch to conservative mode")
+                    _, start_block = self.state.get_last_block()
+                    start_block = start_block + 1
+                self.scan(start_block, end_block)
+                time.sleep(self.request_retry_seconds)
+            except requests.Timeout as err:
+                logging.error('read timeout')
+                time.sleep(self.request_retry_second)
 
 def _retry_web3_call(func, start_block, end_block, retries, delay) -> Tuple[int, list]:
     """A custom retry loop to throttle down block range.
