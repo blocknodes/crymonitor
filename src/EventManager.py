@@ -333,6 +333,7 @@ class EventManager:
 
 
     def run(self):
+        retries = 10
         while True:
             try:
                 start_block = self.get_last_scanned_block() + 1
@@ -343,8 +344,8 @@ class EventManager:
                     start_block = start_block + 1
                 self.scan(start_block, end_block)
                 time.sleep(self.request_retry_seconds)
-            except requests.Timeout as err:
-                logging.error('read timeout')
+            except Exception as e:
+                logging.error(f'exception occur!!!!!!!!!!!!!!!!!!!!!!: {e}')
                 time.sleep(self.request_retry_second)
 
 def _retry_web3_call(func, start_block, end_block, retries, delay) -> Tuple[int, list]:
@@ -371,7 +372,7 @@ def _retry_web3_call(func, start_block, end_block, retries, delay) -> Tuple[int,
             # https://github.com/ethereum/go-ethereum/issues/20426
             if i < retries - 1:
                 # Give some more verbose info than the default middleware
-                logger.warning(
+                logging.warning(
                     "Retrying events for block range %d - %d (%d) failed with %s, retrying in %s seconds",
                     start_block,
                     end_block,
@@ -384,7 +385,7 @@ def _retry_web3_call(func, start_block, end_block, retries, delay) -> Tuple[int,
                 time.sleep(delay)
                 continue
             else:
-                logger.warning("Out of retries")
+                logging.warning("Out of retries")
                 raise
 
 
