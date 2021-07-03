@@ -346,7 +346,7 @@ class EventManager:
                 time.sleep(self.request_retry_seconds)
             except Exception as e:
                 logging.error(f'exception occur!!!!!!!!!!!!!!!!!!!!!!: {e}')
-                time.sleep(self.request_retry_second)
+                time.sleep(self.request_retry_seconds)
 
 def _retry_web3_call(func, start_block, end_block, retries, delay) -> Tuple[int, list]:
     """A custom retry loop to throttle down block range.
